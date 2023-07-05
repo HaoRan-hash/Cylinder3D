@@ -5,7 +5,7 @@
 import numpy as np
 import spconv
 import torch
-from torch import nn
+import spconv.pytorch as spconv
 
 
 def conv3x3(in_planes, out_planes, stride=1, indice_key=None):
