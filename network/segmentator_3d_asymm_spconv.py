@@ -5,6 +5,7 @@
 import numpy as np
 import spconv
 import torch
+from torch import nn
 import spconv.pytorch as spconv
 
 

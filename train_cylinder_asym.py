@@ -77,9 +77,10 @@ def main(args):
     while epoch < train_hypers['max_num_epochs']:
         loss_list = []
         pbar = tqdm(total=len(train_dataset_loader))
-        time.sleep(10)
+        time.sleep(10)   # 这里的sleep很奇怪
         # lr_scheduler.step(epoch)
         for i_iter, (_, train_vox_label, train_grid, _, train_pt_fea) in enumerate(train_dataset_loader):
+            # if 里面是做 val
             if global_iter % check_iter == 0 and epoch >= 1:
                 my_model.eval()
                 hist_list = []
@@ -159,7 +160,7 @@ def main(args):
 if __name__ == '__main__':
     # Training settings
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('-y', '--config_path', default='config/semantickitti.yaml')
+    parser.add_argument('-y', '--config_path', default='config/semantickitti_voxel.yaml')
     args = parser.parse_args()
 
     print(' '.join(sys.argv))

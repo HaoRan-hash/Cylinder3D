@@ -52,6 +52,10 @@ def build(dataset_config,
         min_volume_space=dataset_config['min_volume_space'],
         ignore_label=dataset_config["ignore_label"],
     )
+    
+    # debug
+    # temp1 = train_dataset[0]
+    # temp2 = val_dataset[0]
 
     train_dataset_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                        batch_size=train_dataloader_config["batch_size"],

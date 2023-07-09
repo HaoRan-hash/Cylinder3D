@@ -35,7 +35,7 @@ def get_model_class(name):
 @register_dataset
 class voxel_dataset(data.Dataset):
     def __init__(self, in_dataset, grid_size, rotate_aug=False, flip_aug=False, ignore_label=255, return_test=False,
-                 fixed_volume_space=False, max_volume_space=[50, 50, 1.5], min_volume_space=[-50, -50, -3]):
+                 fixed_volume_space=False, max_volume_space=[50, 50, 1.5], min_volume_space=[-50, -50, -3], **kwargs):
         'Initialization'
         self.point_cloud_dataset = in_dataset
         self.grid_size = np.asarray(grid_size)
@@ -63,6 +63,7 @@ class voxel_dataset(data.Dataset):
             raise Exception('Return invalid data tuple')
 
         # random data augmentation by rotation
+        # 只对 xy 进行旋转，不包括z
         if self.rotate_aug:
             rotate_rad = np.deg2rad(np.random.random() * 360)
             c, s = np.cos(rotate_rad), np.sin(rotate_rad)
@@ -93,7 +94,7 @@ class voxel_dataset(data.Dataset):
         intervals = crop_range / (cur_grid_size - 1)
         if (intervals == 0).any(): print("Zero interval!")
 
-        grid_ind = (np.floor((np.clip(xyz, min_bound, max_bound) - min_bound) / intervals)).astype(np.int)
+        grid_ind = (np.floor((np.clip(xyz, min_bound, max_bound) - min_bound) / intervals)).astype(np.int64)
 
         # process voxel position
         voxel_position = np.zeros(self.grid_size, dtype=np.float32)
@@ -244,7 +245,7 @@ class cylinder_dataset(data.Dataset):
         intervals = crop_range / (cur_grid_size - 1)
 
         if (intervals == 0).any(): print("Zero interval!")
-        grid_ind = (np.floor((np.clip(xyz_pol, min_bound, max_bound) - min_bound) / intervals)).astype(np.int)
+        grid_ind = (np.floor((np.clip(xyz_pol, min_bound, max_bound) - min_bound) / intervals)).astype(np.int64)
 
         voxel_position = np.zeros(self.grid_size, dtype=np.float32)
         dim_array = np.ones(len(self.grid_size) + 1, int)
@@ -344,7 +345,7 @@ class polar_dataset(data.Dataset):
         intervals = crop_range / (cur_grid_size - 1)
 
         if (intervals == 0).any(): print("Zero interval!")
-        grid_ind = (np.floor((np.clip(xyz_pol, min_bound, max_bound) - min_bound) / intervals)).astype(np.int)
+        grid_ind = (np.floor((np.clip(xyz_pol, min_bound, max_bound) - min_bound) / intervals)).astype(np.int64)
 
         voxel_position = np.zeros(self.grid_size, dtype=np.float32)
         dim_array = np.ones(len(self.grid_size) + 1, int)
@@ -382,7 +383,7 @@ def nb_process_label(processed_label, sorted_label_voxel_pair):
     counter = np.zeros((label_size,), dtype=np.uint16)
     counter[sorted_label_voxel_pair[0, 3]] = 1
     cur_sear_ind = sorted_label_voxel_pair[0, :3]
-    for i in range(1, sorted_label_voxel_pair.shape[0]):
+    for i in range(1, sorted_label_voxel_pair.shape[0]):   # 循环每一个点来处理
         cur_ind = sorted_label_voxel_pair[i, :3]
         if not np.all(np.equal(cur_ind, cur_sear_ind)):
             processed_label[cur_sear_ind[0], cur_sear_ind[1], cur_sear_ind[2]] = np.argmax(counter)
@@ -395,7 +396,7 @@ def nb_process_label(processed_label, sorted_label_voxel_pair):
 
 def collate_fn_BEV(data):
     data2stack = np.stack([d[0] for d in data]).astype(np.float32)
-    label2stack = np.stack([d[1] for d in data]).astype(np.int)
+    label2stack = np.stack([d[1] for d in data]).astype(np.int64)
     grid_ind_stack = [d[2] for d in data]
     point_label = [d[3] for d in data]
     xyz = [d[4] for d in data]
@@ -404,7 +405,7 @@ def collate_fn_BEV(data):
 
 def collate_fn_BEV_test(data):
     data2stack = np.stack([d[0] for d in data]).astype(np.float32)
-    label2stack = np.stack([d[1] for d in data]).astype(np.int)
+    label2stack = np.stack([d[1] for d in data]).astype(np.int64)
     grid_ind_stack = [d[2] for d in data]
     point_label = [d[3] for d in data]
     xyz = [d[4] for d in data]
