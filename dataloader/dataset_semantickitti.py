@@ -81,7 +81,7 @@ class voxel_dataset(data.Dataset):
                 xyz[:, :2] = -xyz[:, :2]
 
         max_bound = np.percentile(xyz, 100, axis=0)
-        min_bound = np.percentile(xyz, 0, axis=0)
+        min_bound = np.percentile(xyz, 0, axis=0)   # 这里纯属装b，用np.max()和np.min()也可以。
 
         if self.fixed_volume_space:
             max_bound = np.asarray(self.max_volume_space)
