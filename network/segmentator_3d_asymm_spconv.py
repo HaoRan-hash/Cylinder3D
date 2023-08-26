@@ -49,16 +49,16 @@ class ResContextBlock(nn.Module):
     def __init__(self, in_filters, out_filters, indice_key=None):
         super(ResContextBlock, self).__init__()
         
-        self.conv1 = spconv.SparseSequential(conv1x3(in_filters, out_filters),
+        self.conv1 = spconv.SparseSequential(conv1x3(in_filters, out_filters, indice_key=indice_key + '13'),
                                              nn.BatchNorm1d(out_filters),
                                              nn.LeakyReLU(),
-                                             conv3x1(out_filters, out_filters),
+                                             conv3x1(out_filters, out_filters, indice_key=indice_key + '31'),
                                              nn.BatchNorm1d(out_filters),
                                              nn.LeakyReLU())
-        self.conv2 = spconv.SparseSequential(conv3x1(in_filters, out_filters),
+        self.conv2 = spconv.SparseSequential(conv3x1(in_filters, out_filters, indice_key=indice_key + '31'),
                                              nn.BatchNorm1d(out_filters),
                                              nn.LeakyReLU(),
-                                             conv1x3(out_filters, out_filters),
+                                             conv1x3(out_filters, out_filters, indice_key=indice_key + '13'),
                                              nn.BatchNorm1d(out_filters),
                                              nn.LeakyReLU())
 
@@ -79,23 +79,30 @@ class ResContextBlock(nn.Module):
 
 
 class ResBlock(nn.Module):
-    def __init__(self, in_filters, out_filters, dropout_rate, kernel_size=(3, 3, 3), stride=1,
-                 pooling=True, drop_out=True, height_pooling=False, indice_key=None):
+    def __init__(self, in_filters, out_filters, dropout_rate,
+                 pooling=True, drop_out=True, height_pooling=False, indice_key=None, sub_indice_key=None):
         super(ResBlock, self).__init__()
         self.pooling = pooling
         self.drop_out = drop_out
         
-        self.conv1 = spconv.SparseSequential(conv3x1(in_filters, out_filters),
+        if sub_indice_key is not None:
+            sub_indice_key_31 = sub_indice_key + '31'
+            sub_indice_key_13 = sub_indice_key + '13'
+        else:
+            sub_indice_key_31 = None
+            sub_indice_key_13 = None
+        
+        self.conv1 = spconv.SparseSequential(conv3x1(in_filters, out_filters, indice_key=sub_indice_key_31),
                                              nn.BatchNorm1d(out_filters),
                                              nn.LeakyReLU(),
-                                             conv1x3(out_filters, out_filters),
+                                             conv1x3(out_filters, out_filters, indice_key=sub_indice_key_13),
                                              nn.BatchNorm1d(out_filters),
                                              nn.LeakyReLU())
         
-        self.conv2 = spconv.SparseSequential(conv1x3(in_filters, out_filters),
+        self.conv2 = spconv.SparseSequential(conv1x3(in_filters, out_filters, indice_key=sub_indice_key_13),
                                              nn.BatchNorm1d(out_filters),
                                              nn.LeakyReLU(),
-                                             conv3x1(out_filters, out_filters),
+                                             conv3x1(out_filters, out_filters, indice_key=sub_indice_key_31),
                                              nn.BatchNorm1d(out_filters),
                                              nn.LeakyReLU())
 
@@ -127,7 +134,7 @@ class ResBlock(nn.Module):
 
 
 class UpBlock(nn.Module):
-    def __init__(self, in_filters, out_filters, kernel_size=(3, 3, 3), indice_key=None, up_key=None):
+    def __init__(self, in_filters, out_filters, indice_key=None, up_key=None):
         super(UpBlock, self).__init__()
         
         self.trans = spconv.SparseSequential(conv3x3(in_filters, out_filters),
@@ -168,7 +175,7 @@ class UpBlock(nn.Module):
 
 
 class ReconBlock(nn.Module):
-    def __init__(self, in_filters, out_filters, kernel_size=(3, 3, 3), stride=1, indice_key=None):
+    def __init__(self, in_filters, out_filters, indice_key=None):
         super(ReconBlock, self).__init__()
 
         self.conv1 = spconv.SparseSequential(conv3x1x1(in_filters, out_filters),
@@ -206,17 +213,15 @@ class Asymm_3d_spconv(nn.Module):
         self.strict = False
 
         sparse_shape = np.array(output_shape)
-        # sparse_shape[0] = 11
-        print(sparse_shape)
         self.sparse_shape = sparse_shape
 
         self.downCntx = ResContextBlock(num_input_features, init_size, indice_key="pre")
-        self.resBlock2 = ResBlock(init_size, 2 * init_size, 0.2, height_pooling=True, indice_key="down2")
-        self.resBlock3 = ResBlock(2 * init_size, 4 * init_size, 0.2, height_pooling=True, indice_key="down3")
+        self.resBlock2 = ResBlock(init_size, 2 * init_size, 0.2, height_pooling=True, indice_key="down2", sub_indice_key='pre')
+        self.resBlock3 = ResBlock(2 * init_size, 4 * init_size, 0.2, height_pooling=True, indice_key="down3", sub_indice_key=None)
         self.resBlock4 = ResBlock(4 * init_size, 8 * init_size, 0.2, pooling=True, height_pooling=False,
-                                  indice_key="down4")
+                                  indice_key="down4", sub_indice_key=None)
         self.resBlock5 = ResBlock(8 * init_size, 16 * init_size, 0.2, pooling=True, height_pooling=False,
-                                  indice_key="down5")
+                                  indice_key="down5", sub_indice_key=None)
 
         self.upBlock0 = UpBlock(16 * init_size, 16 * init_size, indice_key="up0", up_key="down5")
         self.upBlock1 = UpBlock(16 * init_size, 8 * init_size, indice_key="up1", up_key="down4")

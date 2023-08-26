@@ -3,6 +3,7 @@
 # @file: cylinder_spconv_3d.py
 
 from torch import nn
+import time
 
 REGISTERED_MODELS_CLASSES = {}
 
@@ -38,9 +39,9 @@ class cylinder_asym(nn.Module):
 
         self.sparse_shape = sparse_shape
 
-    def forward(self, train_pt_fea_ten, train_vox_ten, batch_size):
-        coords, features_3d = self.cylinder_3d_generator(train_pt_fea_ten, train_vox_ten)
-
+    def forward(self, train_pt_fea_ten, train_pt_lab_ten, train_vox_ten, batch_size, grid_size, num_class, ignore_label):
+        coords, features_3d, voxel_labels = self.cylinder_3d_generator(train_pt_fea_ten, train_pt_lab_ten, train_vox_ten, 
+                                                                       batch_size, grid_size, num_class, ignore_label)
         spatial_features = self.cylinder_3d_spconv_seg(features_3d, coords, batch_size)
 
-        return spatial_features
+        return spatial_features, voxel_labels

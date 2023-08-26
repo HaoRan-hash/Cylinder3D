@@ -44,7 +44,7 @@ train_data_loader:
   data_path: "/mnt/Disk16T/chenhr/semantic_kitti/sequences"
   imageset: "train"
   return_ref: True
-  batch_size: 2
+  batch_size: 4
   shuffle: True
   num_workers: 4
 

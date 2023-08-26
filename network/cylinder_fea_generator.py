@@ -4,10 +4,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import numba as nb
-import multiprocessing
 import torch_scatter
+import gen_voxel_label
+import time
 
 
 class cylinder_fea(nn.Module):
@@ -52,34 +51,41 @@ class cylinder_fea(nn.Module):
         else:
             self.pt_fea_dim = self.pool_dim
 
-    def forward(self, pt_fea, xy_ind):
+    def forward(self, pt_fea, pt_lab, pt_ind, batch_size, grid_size, num_class, ignore_label):
         cur_dev = pt_fea[0].get_device()
 
         # concate everything
         cat_pt_ind = []
-        for i_batch in range(len(xy_ind)):
-            cat_pt_ind.append(F.pad(xy_ind[i_batch], (1, 0), 'constant', value=i_batch))
+        for i_batch in range(len(pt_ind)):
+            cat_pt_ind.append(F.pad(pt_ind[i_batch], (1, 0), 'constant', value=i_batch))
 
         cat_pt_fea = torch.cat(pt_fea, dim=0)
+        cat_pt_lab = torch.cat(pt_lab, dim=0)
         cat_pt_ind = torch.cat(cat_pt_ind, dim=0)
         pt_num = cat_pt_ind.shape[0]
 
         # shuffle the data
         shuffled_ind = torch.randperm(pt_num, device=cur_dev)
         cat_pt_fea = cat_pt_fea[shuffled_ind, :]
+        cat_pt_lab = cat_pt_lab[shuffled_ind, :]
         cat_pt_ind = cat_pt_ind[shuffled_ind, :]
-
+        
+        # gen voxel label
+        voxel_labels = torch.ones((batch_size, *grid_size, num_class), dtype=torch.int32, device=cur_dev) * ignore_label
+        gen_voxel_label.gen_voxel_label_cuda(voxel_labels, cat_pt_lab, cat_pt_ind)
+        voxel_labels = voxel_labels.argmax(dim=-1)   # argmax取完就是int64
+    
         # unique xy grid index
-        unq, unq_inv, unq_cnt = torch.unique(cat_pt_ind, return_inverse=True, return_counts=True, dim=0)
+        unq, unq_inv = torch.unique(cat_pt_ind, return_inverse=True, return_counts=False, dim=0)
         unq = unq.type(torch.int64)
 
         # process feature
         processed_cat_pt_fea = self.PPmodel(cat_pt_fea)
-        pooled_data = torch_scatter.scatter_max(processed_cat_pt_fea, unq_inv, dim=0)[0]
+        pooled_data = torch_scatter.scatter_max(processed_cat_pt_fea, unq_inv, dim=0)[0]   # 只是非空voxel的feature
 
         if self.fea_compre:
             processed_pooled_data = self.fea_compression(pooled_data)
         else:
             processed_pooled_data = pooled_data
 
-        return unq, processed_pooled_data
+        return unq, processed_pooled_data, voxel_labels

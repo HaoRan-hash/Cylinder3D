@@ -80,12 +80,12 @@ class voxel_dataset(data.Dataset):
             elif flip_type == 3:
                 xyz[:, :2] = -xyz[:, :2]
 
-        max_bound = np.percentile(xyz, 100, axis=0)
-        min_bound = np.percentile(xyz, 0, axis=0)   # 这里纯属装b，用np.max()和np.min()也可以。
-
         if self.fixed_volume_space:
             max_bound = np.asarray(self.max_volume_space)
             min_bound = np.asarray(self.min_volume_space)
+        else:
+            max_bound = np.max(xyz, axis=0)
+            min_bound = np.min(xyz, axis=0)
 
         # get grid index
         crop_range = max_bound - min_bound
@@ -95,20 +95,6 @@ class voxel_dataset(data.Dataset):
         if (intervals == 0).any(): print("Zero interval!")
 
         grid_ind = (np.floor((np.clip(xyz, min_bound, max_bound) - min_bound) / intervals)).astype(np.int64)
-
-        # process voxel position
-        voxel_position = np.zeros(self.grid_size, dtype=np.float32)
-        dim_array = np.ones(len(self.grid_size) + 1, int)
-        dim_array[0] = -1
-        voxel_position = np.indices(self.grid_size) * intervals.reshape(dim_array) + min_bound.reshape(dim_array)
-
-        # process labels
-        processed_label = np.ones(self.grid_size, dtype=np.uint8) * self.ignore_label
-        label_voxel_pair = np.concatenate([grid_ind, labels], axis=1)
-        label_voxel_pair = label_voxel_pair[np.lexsort((grid_ind[:, 0], grid_ind[:, 1], grid_ind[:, 2])), :]
-        processed_label = nb_process_label(np.copy(processed_label), label_voxel_pair)
-
-        data_tuple = (voxel_position, processed_label)
 
         # center data on each voxel for PTnet
         voxel_centers = (grid_ind.astype(np.float32) + 0.5) * intervals + min_bound
@@ -121,9 +107,9 @@ class voxel_dataset(data.Dataset):
             return_fea = np.concatenate((return_xyz, sig[..., np.newaxis]), axis=1)
 
         if self.return_test:
-            data_tuple += (grid_ind, labels, return_fea, index)
+            data_tuple = (grid_ind, labels, return_fea, index)
         else:
-            data_tuple += (grid_ind, labels, return_fea)
+            data_tuple = (grid_ind, labels, return_fea)
         return data_tuple
 
 
@@ -395,12 +381,8 @@ def nb_process_label(processed_label, sorted_label_voxel_pair):
 
 
 def collate_fn_BEV(data):
-    data2stack = np.stack([d[0] for d in data]).astype(np.float32)
-    label2stack = np.stack([d[1] for d in data]).astype(np.int64)
-    grid_ind_stack = [d[2] for d in data]
-    point_label = [d[3] for d in data]
-    xyz = [d[4] for d in data]
-    return torch.from_numpy(data2stack), torch.from_numpy(label2stack), grid_ind_stack, point_label, xyz
+    grid_ind, point_label, point_fea = zip(*data)   # tuple 类型
+    return grid_ind, point_label, point_fea
 
 
 def collate_fn_BEV_test(data):
