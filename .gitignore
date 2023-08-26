@@ -3,3 +3,6 @@
 .DS_Store
 .vscode/
 __pycache__/
+extension/gen_voxel_label/build
+extension/gen_voxel_label/dist
+extension/gen_voxel_label/gen_voxel_label.egg-info
