@@ -6,3 +6,6 @@ __pycache__/
 extension/gen_voxel_label/build
 extension/gen_voxel_label/dist
 extension/gen_voxel_label/gen_voxel_label.egg-info
+extension/gen_pt_ind/build
+extension/gen_pt_ind/dist
+extension/gen_pt_ind/gen_pt_ind.egg-info

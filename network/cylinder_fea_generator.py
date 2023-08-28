@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch_scatter
 import gen_voxel_label
+import gen_pt_ind
 import time
 
 
@@ -51,29 +52,47 @@ class cylinder_fea(nn.Module):
         else:
             self.pt_fea_dim = self.pool_dim
 
-    def forward(self, pt_fea, pt_lab, pt_ind, batch_size, grid_size, num_class, ignore_label):
+    def forward(self, pt_fea, pt_lab, xyz, batch_size, configs):
         cur_dev = pt_fea[0].get_device()
 
         # concate everything
-        cat_pt_ind = []
-        for i_batch in range(len(pt_ind)):
-            cat_pt_ind.append(F.pad(pt_ind[i_batch], (1, 0), 'constant', value=i_batch))
+        cat_xyz = []
+        for i_batch in range(len(xyz)):
+            cat_xyz.append(F.pad(xyz[i_batch], (1, 0), 'constant', value=i_batch))
 
         cat_pt_fea = torch.cat(pt_fea, dim=0)
         cat_pt_lab = torch.cat(pt_lab, dim=0)
-        cat_pt_ind = torch.cat(cat_pt_ind, dim=0)
-        pt_num = cat_pt_ind.shape[0]
-
+        cat_xyz = torch.cat(cat_xyz, dim=0)
+        pt_num = cat_xyz.shape[0]
+        
+        # gen grid index and augment feature (concat relative coordinate)
+        max_bound = torch.tensor(configs['dataset_params']['max_volume_space'], device=cur_dev)
+        min_bound = torch.tensor(configs['dataset_params']['min_volume_space'], device=cur_dev)
+        
+        crop_range = max_bound - min_bound
+        grid_size = torch.tensor(configs['model_params']['output_shape'], device=cur_dev)
+        intervals = crop_range / (grid_size - 1)
+        if (intervals == 0).any(): print("Zero interval!")
+        
+        cat_pt_ind = torch.zeros_like(cat_xyz, device=cur_dev)
+        cat_xyz_clone = cat_xyz.clone()
+        cat_xyz_clone[:, 1:] = cat_xyz_clone[:, 1:].clamp(min_bound, max_bound)
+        gen_pt_ind.gen_pt_ind_cuda(cat_pt_ind, cat_xyz_clone, min_bound, intervals)
+        cat_pt_ind = cat_pt_ind.floor().to(dtype=torch.int64)
+        voxel_centers = (cat_pt_ind[:, 1:].to(dtype=torch.float32) + 0.5) * intervals + min_bound
+        rel_xyz = cat_xyz[:, 1:] - voxel_centers
+        cat_pt_fea = torch.concat((rel_xyz, cat_pt_fea), dim=1)
+        
+        # gen voxel label
+        voxel_labels = torch.ones((batch_size, *grid_size, configs['model_params']['num_class']), 
+                                  dtype=torch.int32, device=cur_dev) * configs['dataset_params']['ignore_label']
+        gen_voxel_label.gen_voxel_label_cuda(voxel_labels, cat_pt_lab, cat_pt_ind)
+        voxel_labels = voxel_labels.argmax(dim=-1)   # argmax取完就是int64
+        
         # shuffle the data
         shuffled_ind = torch.randperm(pt_num, device=cur_dev)
         cat_pt_fea = cat_pt_fea[shuffled_ind, :]
-        cat_pt_lab = cat_pt_lab[shuffled_ind, :]
         cat_pt_ind = cat_pt_ind[shuffled_ind, :]
-        
-        # gen voxel label
-        voxel_labels = torch.ones((batch_size, *grid_size, num_class), dtype=torch.int32, device=cur_dev) * ignore_label
-        gen_voxel_label.gen_voxel_label_cuda(voxel_labels, cat_pt_lab, cat_pt_ind)
-        voxel_labels = voxel_labels.argmax(dim=-1)   # argmax取完就是int64
     
         # unique xy grid index
         unq, unq_inv = torch.unique(cat_pt_ind, return_inverse=True, return_counts=False, dim=0)

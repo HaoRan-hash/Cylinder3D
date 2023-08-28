@@ -80,36 +80,15 @@ class voxel_dataset(data.Dataset):
             elif flip_type == 3:
                 xyz[:, :2] = -xyz[:, :2]
 
-        if self.fixed_volume_space:
-            max_bound = np.asarray(self.max_volume_space)
-            min_bound = np.asarray(self.min_volume_space)
-        else:
-            max_bound = np.max(xyz, axis=0)
-            min_bound = np.min(xyz, axis=0)
-
-        # get grid index
-        crop_range = max_bound - min_bound
-        cur_grid_size = self.grid_size
-
-        intervals = crop_range / (cur_grid_size - 1)
-        if (intervals == 0).any(): print("Zero interval!")
-
-        grid_ind = (np.floor((np.clip(xyz, min_bound, max_bound) - min_bound) / intervals)).astype(np.int64)
-
-        # center data on each voxel for PTnet
-        voxel_centers = (grid_ind.astype(np.float32) + 0.5) * intervals + min_bound
-        return_xyz = xyz - voxel_centers
-        return_xyz = np.concatenate((return_xyz, xyz), axis=1)
-
         if len(data) == 2:
-            return_fea = return_xyz
+            return_fea = xyz
         elif len(data) == 3:
-            return_fea = np.concatenate((return_xyz, sig[..., np.newaxis]), axis=1)
+            return_fea = np.concatenate((xyz, sig[..., np.newaxis]), axis=1)
 
         if self.return_test:
-            data_tuple = (grid_ind, labels, return_fea, index)
+            data_tuple = (xyz, labels, return_fea, index)
         else:
-            data_tuple = (grid_ind, labels, return_fea)
+            data_tuple = (xyz, labels, return_fea)
         return data_tuple
 
 
@@ -381,8 +360,8 @@ def nb_process_label(processed_label, sorted_label_voxel_pair):
 
 
 def collate_fn_BEV(data):
-    grid_ind, point_label, point_fea = zip(*data)   # tuple 类型
-    return grid_ind, point_label, point_fea
+    xyz, point_label, point_fea = zip(*data)   # tuple 类型
+    return xyz, point_label, point_fea
 
 
 def collate_fn_BEV_test(data):
