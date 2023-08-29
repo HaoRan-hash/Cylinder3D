@@ -11,6 +11,9 @@ import numpy as np
 import torch
 import torch.optim as optim
 from tqdm import tqdm
+from pathlib import Path
+import datetime
+import shutil
 
 from utils.metric_util import per_class_iu, fast_hist_crop
 from dataloader.pc_dataset import get_SemKITTI_label_name
@@ -18,13 +21,14 @@ from builder import data_builder, model_builder, loss_builder
 from config.config import load_config_data
 
 from utils.load_save_util import load_checkpoint
+from utils.log_util import create_logger
 
 import warnings
 
 warnings.filterwarnings("ignore")
 
 
-def main(args):
+def main(args, logger, output_path):
     pytorch_device = torch.device('cuda:0')
 
     config_path = args.config_path
@@ -44,16 +48,17 @@ def main(args):
     grid_size = model_config['output_shape']
     num_class = model_config['num_class']
     ignore_label = dataset_config['ignore_label']
-
-    model_load_path = train_hypers['model_load_path']
-    model_save_path = train_hypers['model_save_path']
+    
+    model_load_path_list = list(output_path.glob('*.pth'))
+    model_load_path = model_load_path_list[0] if len(model_load_path_list) > 0 else None
+    model_save_path = output_path
 
     SemKITTI_label_name = get_SemKITTI_label_name(dataset_config["label_mapping"])
     unique_label = np.asarray(sorted(list(SemKITTI_label_name.keys())))[1:] - 1
     unique_label_str = [SemKITTI_label_name[x] for x in unique_label + 1]
 
     my_model = model_builder.build(model_config)
-    if os.path.exists(model_load_path):
+    if model_load_path is not None:
         my_model = load_checkpoint(model_load_path, my_model)
 
     my_model.to(pytorch_device)
@@ -117,7 +122,7 @@ def main(args):
                 # save model if performance is improved
                 if best_val_miou < val_miou:
                     best_val_miou = val_miou
-                    torch.save(my_model.state_dict(), model_save_path)
+                    torch.save(my_model.state_dict(), str(model_save_path / f'model_{epoch}.pth'))
 
                 print('Current val miou is %.3f while the best val miou is %.3f' %
                       (val_miou, best_val_miou))
@@ -168,4 +173,9 @@ if __name__ == '__main__':
 
     print(' '.join(sys.argv))
     print(args)
-    main(args)
+    
+    output_path = Path(f'outputs/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}')
+    output_path.mkdir(mode=0o755)
+    logger = create_logger(str(output_path / 'train_val.log'))
+    shutil.copy(args.config_path, str(output_path))
+    main(args, logger, output_path)

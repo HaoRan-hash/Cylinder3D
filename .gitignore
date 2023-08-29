@@ -10,3 +10,4 @@ extension/gen_pt_ind/build
 extension/gen_pt_ind/dist
 extension/gen_pt_ind/gen_pt_ind.egg-info
 temp.py
+outputs/
