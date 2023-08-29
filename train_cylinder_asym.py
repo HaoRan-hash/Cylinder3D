@@ -81,7 +81,6 @@ def main(args, logger, output_path):
     check_iter = train_hypers['eval_every_n_steps']
 
     while epoch < train_hypers['max_num_epochs']:
-        loss_list = []
         pbar = tqdm(total=len(train_dataset_loader))
         # lr_scheduler.step(epoch)
         for i_iter, (xyz, train_pt_lab, train_pt_fea) in enumerate(train_dataset_loader):
@@ -143,24 +142,13 @@ def main(args, logger, output_path):
             scaler.step(optimizer)
             scaler.update()    
             
-            loss_list.append(loss.item())
-
-            if global_iter % 1000 == 0:
-                if len(loss_list) > 0:
-                    print('epoch %d iter %5d, loss: %.3f\n' %
-                          (epoch, i_iter, np.mean(loss_list)))
-                else:
-                    print('loss error')
-
+            # 实时刷新
+            if i_iter % configs['train_params']['show_gap'] == 0:
+                pbar.set_postfix_str(f'loss={loss.item():.4f}')
+            
             optimizer.zero_grad()
             pbar.update(1)
             global_iter += 1
-            if global_iter % check_iter == 0:
-                if len(loss_list) > 0:
-                    print('epoch %d iter %5d, loss: %.3f\n' %
-                          (epoch, i_iter, np.mean(loss_list)))
-                else:
-                    print('loss error')
         pbar.close()
         epoch += 1
 
