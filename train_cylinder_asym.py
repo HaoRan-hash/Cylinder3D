@@ -1,8 +1,3 @@
-# -*- coding:utf-8 -*-
-# author: Xinge
-# @file: train_cylinder_asym.py
-
-
 import os
 import time
 import argparse
@@ -14,6 +9,8 @@ from tqdm import tqdm
 from pathlib import Path
 import datetime
 import shutil
+import spconv as spconv_core
+spconv_core.constants.SPCONV_ALLOW_TF32 = True
 
 from utils.metric_util import per_class_iu, fast_hist_crop
 from dataloader.pc_dataset import get_SemKITTI_label_name
@@ -28,6 +25,39 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
+def val(logger, model, val_dataset_loader, configs, pytorch_device, lovasz_softmax, loss_func,
+        unique_label, unique_label_str):
+    model.eval()
+    hist_list = []
+    val_loss_list = []
+    with torch.no_grad():
+        for val_xyz, val_pt_lab, val_pt_fea in tqdm(val_dataset_loader):
+
+            val_pt_fea_ten = [torch.from_numpy(i).to(dtype=torch.float32, device=pytorch_device) for i in val_pt_fea]
+            val_pt_lab_ten = [torch.from_numpy(i).to(dtype=torch.int64, device=pytorch_device) for i in val_pt_lab]
+            val_xyz_ten = [torch.from_numpy(i).to(dtype=torch.float32, device=pytorch_device) for i in val_xyz]
+            val_batch_size = len(val_pt_fea_ten)
+            outputs, voxel_label_tensor, cat_pt_ind = model(val_pt_fea_ten, val_pt_lab_ten, val_xyz_ten, val_batch_size,
+                                                        configs)
+            loss = lovasz_softmax(torch.nn.functional.softmax(outputs).detach(), voxel_label_tensor,
+                                ignore=0) + loss_func(outputs.detach(), voxel_label_tensor)
+            outputs = torch.argmax(outputs, dim=1)
+            
+            outputs = outputs.detach().cpu().numpy()
+            cat_pt_ind = cat_pt_ind.detach().cpu().numpy()
+            hist_list.append(fast_hist_crop(outputs[cat_pt_ind[:, 0], cat_pt_ind[:, 1], cat_pt_ind[:, 2], cat_pt_ind[:, 3]],
+                                            np.concatenate(val_pt_lab), unique_label))
+            val_loss_list.append(loss.detach().cpu().numpy())
+    model.train()
+    iou = per_class_iu(sum(hist_list))
+    logger.info('Validation per class iou:')
+    for class_name, class_iou in zip(unique_label_str, iou):
+        logger.info('%s : %.2f%%' % (class_name, class_iou * 100))
+    val_miou = np.nanmean(iou) * 100
+
+    return val_miou, np.mean(val_loss_list)
+
+
 def main(args, logger, output_path):
     pytorch_device = torch.device('cuda:0')
 
@@ -39,9 +69,6 @@ def main(args, logger, output_path):
     train_dataloader_config = configs['train_data_loader']
     val_dataloader_config = configs['val_data_loader']
 
-    val_batch_size = val_dataloader_config['batch_size']
-    train_batch_size = train_dataloader_config['batch_size']
-
     model_config = configs['model_params']
     train_hypers = configs['train_params']
 
@@ -49,8 +76,6 @@ def main(args, logger, output_path):
     num_class = model_config['num_class']
     ignore_label = dataset_config['ignore_label']
     
-    model_load_path_list = list(output_path.glob('*.pth'))
-    model_load_path = model_load_path_list[0] if len(model_load_path_list) > 0 else None
     model_save_path = output_path
 
     SemKITTI_label_name = get_SemKITTI_label_name(dataset_config["label_mapping"])
@@ -58,12 +83,12 @@ def main(args, logger, output_path):
     unique_label_str = [SemKITTI_label_name[x] for x in unique_label + 1]
 
     my_model = model_builder.build(model_config)
-    if model_load_path is not None:
-        my_model = load_checkpoint(model_load_path, my_model)
-
     my_model.to(pytorch_device)
+    # resume
+    if args.model_ckpt:
+        my_model.load_state_dict(torch.load(args.model_ckpt, map_location=pytorch_device))
+    
     optimizer = optim.Adam(my_model.parameters(), lr=train_hypers["learning_rate"])
-    scaler = torch.cuda.amp.GradScaler()
 
     loss_func, lovasz_softmax = loss_builder.build(wce=True, lovasz=True,
                                                    num_class=num_class, ignore_label=ignore_label)
@@ -81,82 +106,51 @@ def main(args, logger, output_path):
     check_iter = train_hypers['eval_every_n_steps']
 
     while epoch < train_hypers['max_num_epochs']:
-        pbar = tqdm(total=len(train_dataset_loader))
-        # lr_scheduler.step(epoch)
-        for i_iter, (xyz, train_pt_lab, train_pt_fea) in enumerate(train_dataset_loader):
-            # if 里面是做 val
-            if global_iter % check_iter == 0 and epoch >= 1:
-                my_model.eval()
-                hist_list = []
-                val_loss_list = []
-                with torch.no_grad():
-                    for i_iter_val, (xyz, val_pt_lab, val_pt_fea) in enumerate(
-                            val_dataset_loader):
-
-                        val_pt_fea_ten = [torch.from_numpy(i).to(dtype=torch.float32, device=pytorch_device) for i in val_pt_fea]
-                        val_pt_lab_ten = [torch.from_numpy(i).to(dtype=torch.int64, device=pytorch_device) for i in val_pt_lab]
-                        xyz_ten = [torch.from_numpy(i).to(device=pytorch_device) for i in xyz]
-                        val_batch_size = len(val_pt_fea_ten)
-                        predict_labels, val_label_tensor = my_model(val_pt_fea_ten, val_pt_lab_ten, xyz_ten, val_batch_size,
-                                                                    configs)
-                        # aux_loss = loss_fun(aux_outputs, point_label_tensor)
-                        loss = lovasz_softmax(torch.nn.functional.softmax(predict_labels).detach(), val_label_tensor,
-                                              ignore=0) + loss_func(predict_labels.detach(), val_label_tensor)
-                        predict_labels = torch.argmax(predict_labels, dim=1)
-                        predict_labels = predict_labels.cpu().detach().numpy()
-                        for count, i_val_grid in enumerate(val_grid):
-                            hist_list.append(fast_hist_crop(predict_labels[
-                                                                count, val_grid[count][:, 0], val_grid[count][:, 1],
-                                                                val_grid[count][:, 2]], val_pt_lab[count],
-                                                            unique_label))
-                        val_loss_list.append(loss.detach().cpu().numpy())
-                my_model.train()
-                iou = per_class_iu(sum(hist_list))
-                print('Validation per class iou: ')
-                for class_name, class_iou in zip(unique_label_str, iou):
-                    print('%s : %.2f%%' % (class_name, class_iou * 100))
-                val_miou = np.nanmean(iou) * 100
-                del val_grid, val_pt_fea, val_grid_ten
-
-                # save model if performance is improved
-                if best_val_miou < val_miou:
-                    best_val_miou = val_miou
-                    torch.save(my_model.state_dict(), str(model_save_path / f'model_{epoch}.pth'))
-
-                print('Current val miou is %.3f while the best val miou is %.3f' %
-                      (val_miou, best_val_miou))
-                print('Current val loss is %.3f' %
-                      (np.mean(val_loss_list)))
-
+        pbar = tqdm(train_dataset_loader)
+        for i_iter, (train_xyz, train_pt_lab, train_pt_fea) in enumerate(pbar):
             train_pt_fea_ten = [torch.from_numpy(i).to(dtype=torch.float32, device=pytorch_device) for i in train_pt_fea]
             train_pt_lab_ten = [torch.from_numpy(i).to(dtype=torch.int64, device=pytorch_device) for i in train_pt_lab]
-            xyz_ten = [torch.from_numpy(i).to(device=pytorch_device) for i in xyz]
+            train_xyz_ten = [torch.from_numpy(i).to(dtype=torch.float32, device=pytorch_device) for i in train_xyz]
             train_batch_size = len(train_pt_fea_ten)
             # forward + backward + optimize
-            with torch.cuda.amp.autocast():
-                outputs, point_label_tensor = my_model(train_pt_fea_ten, train_pt_lab_ten, xyz_ten, train_batch_size, 
-                                                       configs)   # 其实是voxel_label_tensor
-                loss = lovasz_softmax(torch.nn.functional.softmax(outputs), point_label_tensor, ignore=0) + loss_func(
-                    outputs, point_label_tensor)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()    
+            outputs, voxel_label_tensor, _ = my_model(train_pt_fea_ten, train_pt_lab_ten, train_xyz_ten, train_batch_size, 
+                                                    configs)   # 其实是voxel_label_tensor
+            loss = lovasz_softmax(torch.nn.functional.softmax(outputs), voxel_label_tensor, ignore=0) + loss_func(
+                outputs, voxel_label_tensor)
+            
+            loss.backward()
+            optimizer.step()
             
             # 实时刷新
             if i_iter % configs['train_params']['show_gap'] == 0:
                 pbar.set_postfix_str(f'loss={loss.item():.4f}')
             
             optimizer.zero_grad()
-            pbar.update(1)
             global_iter += 1
-        pbar.close()
+        
+        # if 里面是做 val
+        if global_iter % check_iter == 0 and epoch >= 0:
+            val_miou, val_loss = val(logger, my_model, val_dataset_loader, configs, pytorch_device, lovasz_softmax, loss_func,
+                                        unique_label, unique_label_str)
+            
+            # save model if performance is improved
+            if best_val_miou < val_miou:
+                best_val_miou = val_miou
+                torch.save(my_model.state_dict(), str(model_save_path / 'best.pth'))
+
+            logger.info('Current val miou is %.3f while the best val miou is %.3f' %
+                    (val_miou, best_val_miou))
+            logger.info('Current val loss is %.3f \n' %
+                    (val_loss))
+            torch.cuda.empty_cache()   # val之后释放所有显存
         epoch += 1
 
 
 if __name__ == '__main__':
     # Training settings
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('-y', '--config_path', default='config/semantickitti_voxel.yaml')
+    parser.add_argument('--config_path', required=True)
+    parser.add_argument('--model_ckpt')
     args = parser.parse_args()
 
     print(' '.join(sys.argv))
