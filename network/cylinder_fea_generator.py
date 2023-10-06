@@ -92,7 +92,7 @@ class cylinder_fea(nn.Module):
         # shuffle the data
         shuffled_ind = torch.randperm(pt_num, device=cur_dev)
         cat_pt_fea = cat_pt_fea[shuffled_ind, :]
-        cat_pt_ind = cat_pt_ind[shuffled_ind, :]
+        # cat_pt_ind = cat_pt_ind[shuffled_ind, :]
     
         # unique xy grid index
         unq, unq_inv = torch.unique(cat_pt_ind, return_inverse=True, return_counts=False, dim=0)
@@ -107,4 +107,4 @@ class cylinder_fea(nn.Module):
         else:
             processed_pooled_data = pooled_data
 
-        return unq, processed_pooled_data, voxel_labels
+        return unq, processed_pooled_data, voxel_labels, cat_pt_ind
