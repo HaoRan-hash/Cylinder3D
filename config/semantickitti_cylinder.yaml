@@ -41,18 +41,18 @@ dataset_params:
 ###################
 ## Data_loader options
 train_data_loader:
-  data_path: "/perception/users/chenhaoran/sem_kitti/sequences"
+  data_path: "/mnt/Disk16T/chenhr/semantic_kitti/sequences"
   imageset: "train"
   return_ref: True
-  batch_size: 2
+  batch_size: 4
   shuffle: True
   num_workers: 4
 
 val_data_loader:
-  data_path: "/perception/users/chenhaoran/sem_kitti/sequences"
+  data_path: "/mnt/Disk16T/chenhr/semantic_kitti/sequences"
   imageset: "val"
   return_ref: True
-  batch_size: 1
+  batch_size: 4
   shuffle: False
   num_workers: 4
 
@@ -62,7 +62,7 @@ val_data_loader:
 train_params:
   model_load_path: "./model_load_dir/model_load.pt"
   model_save_path: "./model_save_dir/model_save.pt"
-  checkpoint_every_n_steps: 4599
   max_num_epochs: 40
-  eval_every_n_steps: 4599
+  eval_every_n_steps: 4783
   learning_rate: 0.001
+  show_gap: 1
