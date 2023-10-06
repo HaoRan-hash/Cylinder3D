@@ -40,9 +40,9 @@ class cylinder_asym(nn.Module):
 
         self.sparse_shape = sparse_shape
 
-    def forward(self, train_pt_fea_ten, train_pt_lab_ten, xyz_ten, batch_size, configs):
-        coords, features_3d, voxel_labels = self.cylinder_3d_generator(train_pt_fea_ten, train_pt_lab_ten, xyz_ten, 
+    def forward(self, pt_fea_ten, pt_lab_ten, xyz_ten, batch_size, configs):
+        coords, features_3d, voxel_labels, cat_pt_ind = self.cylinder_3d_generator(pt_fea_ten, pt_lab_ten, xyz_ten, 
                                                                        batch_size, configs)
         spatial_features = self.cylinder_3d_spconv_seg(features_3d, coords, batch_size)
 
-        return spatial_features, voxel_labels
+        return spatial_features, voxel_labels, cat_pt_ind
