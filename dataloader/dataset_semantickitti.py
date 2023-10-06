@@ -165,6 +165,7 @@ class cylinder_dataset(data.Dataset):
             raise Exception('Return invalid data tuple')
 
         # random data augmentation by rotation
+        # 只对xy进行旋转，不包括z
         if self.rotate_aug:
             rotate_rad = np.deg2rad(np.random.random() * 90) - np.pi / 4
             c, s = np.cos(rotate_rad), np.sin(rotate_rad)
@@ -180,12 +181,14 @@ class cylinder_dataset(data.Dataset):
                 xyz[:, 1] = -xyz[:, 1]
             elif flip_type == 3:
                 xyz[:, :2] = -xyz[:, :2]
+                
+        # 相较于voxel，多了scale，还是只对xy做
         if self.scale_aug:
             noise_scale = np.random.uniform(0.95, 1.05)
             xyz[:, 0] = noise_scale * xyz[:, 0]
             xyz[:, 1] = noise_scale * xyz[:, 1]
-        # convert coordinate into polar coordinates
 
+        # 相较于voxel，还多了translate，对xyz做
         if self.transform:
             noise_translate = np.array([np.random.normal(0, self.trans_std[0], 1),
                                         np.random.normal(0, self.trans_std[1], 1),
@@ -193,51 +196,18 @@ class cylinder_dataset(data.Dataset):
 
             xyz[:, 0:3] += noise_translate
 
+        # convert coordinate into polar coordinates
         xyz_pol = cart2polar(xyz)
 
-        max_bound_r = np.percentile(xyz_pol[:, 0], 100, axis=0)
-        min_bound_r = np.percentile(xyz_pol[:, 0], 0, axis=0)
-        max_bound = np.max(xyz_pol[:, 1:], axis=0)
-        min_bound = np.min(xyz_pol[:, 1:], axis=0)
-        max_bound = np.concatenate(([max_bound_r], max_bound))
-        min_bound = np.concatenate(([min_bound_r], min_bound))
-        if self.fixed_volume_space:
-            max_bound = np.asarray(self.max_volume_space)
-            min_bound = np.asarray(self.min_volume_space)
-        # get grid index
-        crop_range = max_bound - min_bound
-        cur_grid_size = self.grid_size
-        intervals = crop_range / (cur_grid_size - 1)
-
-        if (intervals == 0).any(): print("Zero interval!")
-        grid_ind = (np.floor((np.clip(xyz_pol, min_bound, max_bound) - min_bound) / intervals)).astype(np.int64)
-
-        voxel_position = np.zeros(self.grid_size, dtype=np.float32)
-        dim_array = np.ones(len(self.grid_size) + 1, int)
-        dim_array[0] = -1
-        voxel_position = np.indices(self.grid_size) * intervals.reshape(dim_array) + min_bound.reshape(dim_array)
-        voxel_position = polar2cat(voxel_position)
-
-        processed_label = np.ones(self.grid_size, dtype=np.uint8) * self.ignore_label
-        label_voxel_pair = np.concatenate([grid_ind, labels], axis=1)
-        label_voxel_pair = label_voxel_pair[np.lexsort((grid_ind[:, 0], grid_ind[:, 1], grid_ind[:, 2])), :]
-        processed_label = nb_process_label(np.copy(processed_label), label_voxel_pair)
-        data_tuple = (voxel_position, processed_label)
-
-        # center data on each voxel for PTnet
-        voxel_centers = (grid_ind.astype(np.float32) + 0.5) * intervals + min_bound
-        return_xyz = xyz_pol - voxel_centers
-        return_xyz = np.concatenate((return_xyz, xyz_pol, xyz[:, :2]), axis=1)
-
         if len(data) == 2:
-            return_fea = return_xyz
+            return_fea = np.concatenate((xyz_pol, xyz[:, :2]), axis=1)
         elif len(data) == 3:
-            return_fea = np.concatenate((return_xyz, sig[..., np.newaxis]), axis=1)
+            return_fea = np.concatenate((xyz_pol, xyz[:, :2], sig[..., np.newaxis]), axis=1)
 
         if self.return_test:
-            data_tuple += (grid_ind, labels, return_fea, index)
+            data_tuple = (xyz_pol, labels, return_fea, index)
         else:
-            data_tuple += (grid_ind, labels, return_fea)
+            data_tuple = (xyz_pol, labels, return_fea)
         return data_tuple
 
 
